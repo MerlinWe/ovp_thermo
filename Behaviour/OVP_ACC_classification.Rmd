@@ -1,0 +1,200 @@
+---
+title: "Classifying ACC data (OVP project)"
+author: "Merlin Weiß"
+date: '2023-11-19'
+output: html_document
+css: layout.css
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/serpent/Documents/VHL/RAAK/Stats/Class (MWe)")
+
+library(knitr)
+library(cowplot)
+library(rabc)
+library(DT)
+library(kableExtra)
+library(plyr)
+library(tidyverse)
+```
+
+This markdown discusses the performance of two types of ML models (**XGBoost** and **Random Forest**) to classify behaviour using data from
+
+- the OVP and the Dairy Campus
+- just the OVP
+- just the Dairy Campus. 
+
+All models perform rather poorly, and behaviour labels must probably be adjusted or altered to improve performance. 
+
+# Labels
+
+Labelled data includes the ACC bursts (10Hz, i.e., 10 seconds of ACC measurements with 10 measurements per second per coordinate = 100 values per x, y, and z transformed to gravitational force) that have corresponding video observations and the observed behaviour. We got the following numer of ACC bursts per behaviour: 
+
+
+OVP: 
+
+```{r ovp data, echo = FALSE, message=FALSE, warning=FALSE}
+
+ovp <- read_csv("/Users/serpent/Documents/VHL/RAAK/Stats/Class (MWe)/RABC/labelled_old_only_ovp.csv") %>%
+	mutate(Behaviour = ifelse(grepl("Foraging", behaviour), "Foraging",
+														ifelse(grepl("Resting", behaviour), "Resting",
+																	 ifelse(grepl("Walking", behaviour), "Foraging", NA)))) %>%
+	select(-behaviour) %>%
+	mutate_if(is.numeric, ~ .*9.81) # convert to m/s² (gravitational force)
+
+table(ovp$Behaviour)
+
+```
+
+Dairy campus: 
+
+```{r dairy campus data, echo = FALSE, message=FALSE, warning=FALSE}
+
+mydir <- "/Users/serpent/Documents/VHL/RAAK/Data/dairy campus/DC_001/ACC"
+myfiles <- list.files(path=mydir, pattern="*.CSV", full.names=TRUE)
+dc_01 <- ldply(myfiles, read_csv)
+mydir <- "/Users/serpent/Documents/VHL/RAAK/Data/dairy campus/DC_002/ACC"
+myfiles <- list.files(path=mydir, pattern="*.CSV", full.names=TRUE)
+dc_02 <- ldply(myfiles, read_csv)
+
+dc <- bind_rows(dc_01, dc_02) %>% select(-prop_Position, -prop_Behaviour, timestamp, -resolution, -samplerate, -scale)
+dc <- dc %>% select(-Position, -timestamp) %>% na.omit()
+dc <- dc %>% 
+	mutate(Behaviour = ifelse(grepl("f", Behaviour), "Foraging",
+														ifelse(grepl("F", Behaviour), "Foraging",
+																	 ifelse(grepl("Re", Behaviour), "Resting",
+																	 			 ifelse(grepl("rre", Behaviour), "Resting",
+																	 			 			 ifelse(grepl("Ru", Behaviour), "Ruminating", NA)))))) %>% 
+	na.omit() %>%
+	mutate_if(is.numeric, ~ .*9.81) # convert to m/s² (gravitational force)
+
+rm(dc_01, dc_02, mydir, myfiles)
+table(dc$Behaviour)
+
+```
+
+OVP and Dairy campus: 
+
+```{r ovp and dc data, echo = FALSE, message=FALSE, warning=FALSE}
+
+all <- bind_rows(dc, ovp)
+table(all$Behaviour)
+```
+
+# Feature engeineering
+
+For all three data (ovp, dc, ovp+dc), we'll calculate descriptive features for the domain of time (mean, variance, standard deviation, max, min, range and ODBA for x, y, and z except ODBA, which is calculated using all available axes) and frequency (main frequency, main amplitude and frequency entropy for x, y, and z). \
+
+The table below shows features of ovp + dairy campus: 
+
+```{r calc features, echo=FALSE, warning=FALSE, message=FALSE}
+
+ovp <- order_acc(df_raw = ovp)
+dc  <- order_acc(df_raw = dc)
+all <- order_acc(df_raw = all)
+
+# OVP
+ovp_labels <- ovp$Behaviour
+df_time <- calculate_feature_time(df_raw = ovp, winlen_dba = 10)
+df_freq <- calculate_feature_freq(df_raw = ovp, samp_freq = 10) 
+ovp <- bind_cols(df_time, df_freq)
+
+# DC
+dc_labels <- dc$Behaviour
+df_time <- calculate_feature_time(df_raw = dc, winlen_dba = 10)
+df_freq <- calculate_feature_freq(df_raw = dc, samp_freq = 10) 
+dc <- bind_cols(df_time, df_freq)
+
+# All
+all_labels <- all$Behaviour
+df_time <- calculate_feature_time(df_raw = all, winlen_dba = 10)
+df_freq <- calculate_feature_freq(df_raw = all, samp_freq = 10) 
+all <- bind_cols(df_time, df_freq)
+
+rm(df_time, df_freq)
+datatable(bind_cols(as_tibble_col(all_labels, column_name = "Behaviour"), all),
+					options = list(scrollX = TRUE, rownames = FALSE,
+            columnDefs = list(list(visible = TRUE, targets = c(6:28))), 
+            caption = "Descriptive features of ovp + dc data"))
+
+```
+
+## Feature selection 
+
+We can either use all features above, or a selection of the *n* best ones (with or without a correlation filter). ML models **can** be sensitive to collinearity between variables, as redundancy in information may result in excessive importance of similar features, potentially leading to overfitting. In tree-based models (including RF & XGBoost), correlated variables might compete with each other during the splitting process and lead to instability in feature importance measures or inconsistent splitting decisions across different model runs. However, both models are still considered relative robust to correlated features, especially if interpreting variable importance is less important. Since we are only interested in the predictive performance, we'll try fitting models with all variables and with only main variables after applying a correlation filter. The filtering method uses the absolute values of pair-wise correlation coefficients between features. If two variables have a high correlation, the function looks at the mean absolute correlation of each variable and removes the variable with the largest mean absolute correlation
+
+For the OVP data, the 10 best features (using a correlation filter), see plot below (Red line and dots in the plot denotes classification accuracies of accumulated selected features. Grey bars indicate accuracy increase of each selected feature):
+
+```{r ovp feature selection, echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=5}
+
+ovp_best <- select_features(df_feature = ovp, filter = TRUE, vec_label = ovp_labels, no_features = 10)
+ovp_best <- ovp %>% select(any_of(ovp_best$features))
+colnames(ovp_best)
+
+# plot_feature(df_feature = ovp_best[, "z_freqamp", drop = FALSE], vec_label = ovp_labels)
+```
+
+Dairy campus:
+
+```{r dc feature selection, echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=5}
+
+dc_best <- select_features(df_feature = dc, filter = TRUE, vec_label = dc_labels, no_features = 10)
+dc_best <- dc %>% select(any_of(dc_best$features))
+colnames(dc_best)
+
+# plot_feature(df_feature = dc_best[, "z_max", drop = FALSE], vec_label = dc_labels)
+```
+
+OVP and Dairy campus:
+
+```{r all feature selection, echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=5}
+
+all_best <- select_features(df_feature = all, filter = TRUE, vec_label = all_labels, no_features = 10)
+all_best <- all %>% select(any_of(all_best$features))
+colnames(all_best)
+
+# plot_feature(df_feature = all_best[, "x_max", drop = FALSE], vec_label = all_labels)
+```
+
+# OVP modelling
+
+### XGBoost
+
+```{r XGBoost OVP, echp = FALSE, message=FALSE, warning=FALSE}
+
+ovp_xgb_all  <- train_model(df = ovp, vec_label = ovp_labels) 
+ovp_xgb_best <- train_model(df = ovp_best, vec_label = ovp_labels) 
+
+```
+
+### Random Forest
+
+# Dairy campuis modelling
+
+### XGBoost
+
+```{r XGBoost OVP, echp = FALSE, message=FALSE, warning=FALSE}
+
+dc_xgb_all  <- train_model(df = dc, vec_label = dc_labels) 
+dc_xgb_best <- train_model(df = dc_best, vec_label = dc_labels) 
+
+```
+
+
+### Random Forest
+
+# OVP and Dairy campus modelling
+
+### XGBoost
+
+```{r XGBoost OVP, echp = FALSE, message=FALSE, warning=FALSE}
+
+all_xgb_all  <- train_model(df = all, vec_label = all_labels) 
+all_xgb_best <- train_model(df = all_best, vec_label = all_labels) 
+
+```
+
+
+### Random Forest
+

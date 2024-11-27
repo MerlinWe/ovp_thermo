@@ -1,0 +1,37 @@
+/* Custom styles for R Markdown HTML output */
+
+/* Set background color to a light color (e.g., white or a color of your choice) */
+body {
+    background-color: #ffffff; /* Example: white background */
+    color: #000000; /* Example: black text */
+    text-align: justify; /* Example: center text */
+}
+
+/* Link color */
+a {
+  color: blue;
+}
+
+/* Change the color of code within quotation marks to green */
+.hljs-string {
+    color: #005b2b; /* Example: green color */
+}
+
+/* Change the color of numbers to orange */
+.hljs-number {
+    color: #b43900; /* Example: orange color */
+}
+
+<style>
+/* Change font to a mathematical font */
+body {
+    font-family: "Latin Modern Math", "Cambria Math", "STIXGeneral", "Asana Math", "Computer Modern";
+    /* Replace with your preferred mathematical font */
+}
+
+/* Change font size */
+p {
+    font-size: 18px; /* Change the size as needed */
+}
+</style>
+
