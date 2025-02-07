@@ -1,5 +1,5 @@
 ##################################################################################
-############################ OVP analysis: summer day ############################
+############################ OVP analysis: fall day ############################
 ##################################################################################
 
 rm(list = ls()); gc() # make sure environment is clean 
@@ -28,17 +28,17 @@ source("SEM (MWE)/functions.R")
 # Read data
 dat <- read_csv("/Users/serpent/Documents/VHL/OVP/Data/ovp_data_10_12_24.csv")
 
-# Get summer day subset 
-summer <- dat %>% prep_ovp("Summer", "day") # ok
+# Get spring day subset 
+fall <- dat %>% prep_ovp("Fall", "day") # ok
 
 ##### ----------- Exploration ---------- #####
 
-colSums(is.na(summer)) # no missing values 
+colSums(is.na(fall)) # no missing values 
 
 # Check response variables 
-plot1 <- check_response_var(summer, "mean_BT_smooth", "Mean BT Smooth")
-plot2 <- check_response_var(summer, "mean_activity_percent", "Mean Activity Percent")
-plot3 <- check_response_var(summer, "mean_heartrate", "Mean Heartrate")
+plot1 <- check_response_var(fall, "mean_BT_smooth", "Mean BT Smooth")
+plot2 <- check_response_var(fall, "mean_activity_percent", "Mean Activity Percent")
+plot3 <- check_response_var(fall, "mean_heartrate", "Mean Heartrate")
 (plot1 | plot2 | plot3)
 
 rm(plot1, plot2, plot3) # clean environment
@@ -48,29 +48,29 @@ response_vars <- c("mean_BT_smooth", "mean_heartrate", "mean_activity_percent")
 predictor_vars <- c("phase_mean_CT", "day_season", "weight", "mean_activity_percent")
 
 ## Check linearity
-exploration_results <- explore_relationships(summer, response_vars, predictor_vars, random_effect = list(ID = ~1))
+exploration_results <- explore_relationships(fall, response_vars, predictor_vars, random_effect = list(ID = ~1))
 edf_summary <- exploration_results$edf_summary  # Extract EDF summary
 
 ## Check autocorrelation 
-autocorr_BT <- assess_autocorrelation(summer, "mean_BT_smooth", "ID", "season_year", lags = 40)
-autocorr_HR <- assess_autocorrelation(summer, "mean_heartrate", "ID", "season_year", lags = 40)
-autocorr_AC <- assess_autocorrelation(summer, "mean_activity_percent", "ID", "season_year", lags = 40)
+autocorr_BT <- assess_autocorrelation(fall, "mean_BT_smooth", "ID", "season_year", lags = 40)
+autocorr_HR <- assess_autocorrelation(fall, "mean_heartrate", "ID", "season_year", lags = 40)
+autocorr_AC <- assess_autocorrelation(fall, "mean_activity_percent", "ID", "season_year", lags = 40)
 
 ## Check random effect
-random_factor_BT <- explore_random_factor(summer, "mean_BT_smooth", "ID")
-random_factor_HR <- explore_random_factor(summer, "mean_heartrate", "ID")
-random_factor_AC <- explore_random_factor(summer, "mean_activity_percent", "ID")
+random_factor_BT <- explore_random_factor(fall, "mean_BT_smooth", "ID")
+random_factor_HR <- explore_random_factor(fall, "mean_heartrate", "ID")
+random_factor_AC <- explore_random_factor(fall, "mean_activity_percent", "ID")
 
 ## Check Interactions
 interaction_results <- list(
-	"mean_BT_smooth ~ mean_activity_percent * season_year" = test_interaction(summer, "mean_BT_smooth", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_heartrate ~ mean_activity_percent * season_year" = test_interaction(summer, "mean_heartrate", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_BT_smooth ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_BT_smooth", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_heartrate ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_heartrate", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_activity_percent ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_activity_percent", "phase_mean_CT", "season_year", random_effect = ~1 | ID_phase))
+	"mean_BT_smooth ~ mean_activity_percent * season_year" = test_interaction(fall, "mean_BT_smooth", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
+	"mean_heartrate ~ mean_activity_percent * season_year" = test_interaction(fall, "mean_heartrate", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
+	"mean_BT_smooth ~ phase_mean_CT * season_year" = test_interaction(fall, "mean_BT_smooth", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
+	"mean_heartrate ~ phase_mean_CT * season_year" = test_interaction(fall, "mean_heartrate", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
+	"mean_activity_percent ~ phase_mean_CT * season_year" = test_interaction(fall, "mean_activity_percent", "phase_mean_CT", "season_year", random_effect = ~1 | ID_phase))
 
 # Get variable descriptives
-descriptive_stats <- compute_descriptive_stats(summer, c("mean_BT_smooth", "mean_activity_percent", "mean_heartrate", "phase_mean_CT"))
+descriptive_stats <- compute_descriptive_stats(fall, c("mean_BT_smooth", "mean_activity_percent", "mean_heartrate", "phase_mean_CT"))
 print(descriptive_stats)
 
 ##### ----------- Model Selection & Validation ---------- #####
@@ -90,9 +90,9 @@ print(descriptive_stats)
 
 # try random slopes for covariates (dynamic quadratic selection based on EDF)
 random_slope_candidates <- c("mean_activity_percent", "phase_mean_CT", "day_season")
-best_random_effects_model_HR <- test_random_effects(summer, "mean_heartrate", random_slope_candidates, edf_summary)
-best_random_effects_model_BT <- test_random_effects(summer, "mean_BT_smooth", random_slope_candidates, edf_summary)
-best_random_effects_model_ACT <- test_random_effects(summer, "mean_activity_percent", random_slope_candidates, edf_summary)
+best_random_effects_model_HR <- test_random_effects(fall, "mean_heartrate", random_slope_candidates, edf_summary)
+best_random_effects_model_BT <- test_random_effects(fall, "mean_BT_smooth", random_slope_candidates, edf_summary)
+best_random_effects_model_ACT <- test_random_effects(fall, "mean_activity_percent", random_slope_candidates, edf_summary)
 
 # Apply updated fixed effect selection
 best_fixed_model_HR <- select_fixed_effects(best_random_effects_model_HR, "mean_heartrate", edf_summary)
@@ -118,8 +118,4 @@ formula(top_BT)
 
 top_ACT <- best_fixed_model_ACT
 formula(top_ACT)
-
-
-
-# do SEM modelling for summer day
 

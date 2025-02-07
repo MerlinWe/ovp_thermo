@@ -69,6 +69,46 @@ check_response_var <- function(data, variable, var_name) {
 	line_plot / hist_plot
 }
 
+# Function to assess random factor
+explore_random_factor <- function(data, response_vars, random_factor) {
+	results <- list()  # Store results
+	
+	for (var in response_vars) {
+		message(sprintf("Exploring random factor effects for: %s", var))
+		
+		# Boxplot and violin plot combined
+		p <- ggplot(data, aes_string(x = random_factor, y = var)) +
+			geom_boxplot(outlier.color = "red", alpha = 0.6) +
+			geom_violin(fill = "lightblue", alpha = 0.4) +
+			labs(
+				title = sprintf("Distribution of %s by %s", var, random_factor),
+				x = random_factor,
+				y = var
+			) +
+			theme_minimal()
+		
+		print(p)  # Show plot
+		
+		# Fit a random-effects model
+		formula <- as.formula(sprintf("%s ~ 1 + (1|%s)", var, random_factor))
+		model <- lmer(formula, data = data)
+		
+		# Compute ICC
+		icc_value <- performance::icc(model)
+		message(sprintf("ICC for %s: %.3f", var, icc_value$ICC))
+		
+		# Save results
+		results[[var]] <- list(
+			plot = p,
+			model = model,
+			ICC = icc_value$ICC
+		)
+	}
+	
+	return(results)
+}
+
+# Function to check linearity and if a quadratic term is neccessary
 explore_relationships <- function(data, response_vars, predictor_vars, random_effect = NULL) {
 	
 	results <- list()
@@ -198,42 +238,88 @@ assess_autocorrelation <- function(data, variables, id_col, period_col, lags = 4
 }
 
 # Function to assess random factor
-explore_random_factor <- function(data, response_vars, random_factor) {
-	results <- list()  # Store results
+explore_relationships <- function(data, response_vars, predictor_vars, random_effect = NULL) {
 	
-	for (var in response_vars) {
-		message(sprintf("Exploring random factor effects for: %s", var))
+	results <- list()
+	edf_results <- data.frame(response = character(),
+														predictor = character(),
+														EDF = numeric(),
+														correlation = numeric(),
+														stringsAsFactors = FALSE)
+	
+	require(mgcv)
+	
+	for (response in response_vars) {
+		# Exclude `mean_activity_percent` as predictor when response is `mean_activity_percent`
+		predictors <- if (response == "mean_activity_percent") {
+			setdiff(predictor_vars, "mean_activity_percent")
+		} else {
+			predictor_vars
+		}
 		
-		# Boxplot and violin plot combined
-		p <- ggplot(data, aes_string(x = random_factor, y = var)) +
-			geom_boxplot(outlier.color = "red", alpha = 0.6) +
-			geom_violin(fill = "lightblue", alpha = 0.4) +
-			labs(
-				title = sprintf("Distribution of %s by %s", var, random_factor),
-				x = random_factor,
-				y = var
-			) +
-			theme_minimal()
-		
-		print(p)  # Show plot
-		
-		# Fit a random-effects model
-		formula <- as.formula(sprintf("%s ~ 1 + (1|%s)", var, random_factor))
-		model <- lmer(formula, data = data)
-		
-		# Compute ICC
-		icc_value <- performance::icc(model)
-		message(sprintf("ICC for %s: %.3f", var, icc_value$ICC))
-		
-		# Save results
-		results[[var]] <- list(
-			plot = p,
-			model = model,
-			ICC = icc_value$ICC
-		)
+		for (predictor in predictors) {
+			cat("\n", strrep("-", 50), "\n")
+			cat(sprintf("Exploring %s ~ %s\n", response, predictor))
+			
+			# Check correlation
+			if (is.numeric(data[[response]]) && is.numeric(data[[predictor]])) {
+				corr <- cor(data[[response]], data[[predictor]], use = "complete.obs")
+				cat(sprintf("Correlation: %.3f\n", corr))
+			} else {
+				corr <- NA
+			}
+			
+			# Check number of unique values of the predictor
+			unique_vals <- length(unique(na.omit(data[[predictor]])))
+			
+			# Define the smoothing parameter `k`
+			k_value <- min(10, unique_vals - 1)  # Ensure k is not greater than unique values
+			
+			# Fit GAM model only if there are enough unique values
+			if (is.numeric(data[[response]]) && is.numeric(data[[predictor]])) {
+				if (unique_vals > 5) {  # Ensure enough unique values before smoothing
+					gam_formula <- as.formula(sprintf("%s ~ s(%s, k=%d)", response, predictor, k_value))
+					
+					if (!is.null(random_effect)) {
+						gam_model <- gamm(gam_formula, random = random_effect, data = data)
+						edf <- summary(gam_model$gam)$edf[1]
+					} else {
+						gam_model <- gam(gam_formula, data = data)
+						edf <- summary(gam_model)$edf[1]
+					}
+					
+					cat(sprintf("EDF: %.3f (k = %d)\n", edf, k_value))
+					
+				} else {
+					# If too few unique values, use linear regression as fallback
+					cat("Too few unique values for smoothing, using linear regression instead.\n")
+					gam_model <- lm(as.formula(sprintf("%s ~ %s", response, predictor)), data = data)
+					edf <- 1  # Linear regression has 1 degree of freedom for the predictor
+				}
+			} else {
+				gam_model <- NULL
+				edf <- NA
+			}
+			
+			# Store results
+			results[[sprintf("%s_%s", response, predictor)]] <- list(
+				response = response,
+				predictor = predictor,
+				correlation = corr,
+				gam_model = gam_model,
+				edf = edf
+			)
+			
+			# Store EDF in summary dataframe
+			edf_results <- rbind(edf_results, data.frame(response = response, 
+																									 predictor = predictor, 
+																									 EDF = edf, 
+																									 correlation = corr))
+		}
+		cat("\n", strrep("=", 50), "\n")
 	}
 	
-	return(results)
+	return(list(results = results, edf_summary = edf_results))
 }
 
 # Function to run interaction test
@@ -282,6 +368,7 @@ test_interaction <- function(data, response, predictor, moderator, random_effect
 				lme(formula, 
 						random = random_effect, 
 						method = "ML",
+						control = lmeControl(opt = "optim"),  # More stable optimizer
 						data = data, 
 						correlation = correlation_structure, 
 						na.action = na.exclude)
@@ -524,7 +611,7 @@ test_random_effects <- function(data, response, random_slope_candidates, edf_sum
 
 # Fixed effect structure model selection 
 select_fixed_effects <- function(model, response, edf_summary) {
-	message(sprintf("Performing stepwise AIC selection (but keep SEM relevant predictors) for: %s", response))
+	message(sprintf("Performing stepwise AIC selection (but keeping SEM relevant vars in scope) for: %s", response))
 	
 	# Dynamically exclude `mean_activity_percent` as a predictor when response is `mean_activity_percent`
 	predictors <- if (response == "mean_activity_percent") {
@@ -554,16 +641,23 @@ select_fixed_effects <- function(model, response, edf_summary) {
 	# Define the minimum model (lower bound of scope)
 	min_model_terms <- c("season_year")
 	
+	# Ensure `mean_activity_percent` is included and match the quadratic form if necessary
+	if ("mean_activity_percent" %in% quadratic_terms) {
+		min_model_terms <- c(min_model_terms, "poly(mean_activity_percent,2)")
+	} else {
+		min_model_terms <- c(min_model_terms, "mean_activity_percent")
+	}
+	
+	# Ensure `mean_activity_percent` is not included when it is the response variable
+	if (response == "mean_activity_percent") {
+		min_model_terms <- setdiff(min_model_terms, "mean_activity_percent")
+	}
+	
 	# Ensure `phase_mean_CT` is included and match the quadratic form if necessary
 	if ("phase_mean_CT" %in% quadratic_terms) {
 		min_model_terms <- c(min_model_terms, "poly(phase_mean_CT,2)")
 	} else {
 		min_model_terms <- c(min_model_terms, "phase_mean_CT")
-	}
-	
-	# Ensure `mean_activity_percent` is included unless response is `mean_activity_percent`
-	if (response != "mean_activity_percent") {
-		min_model_terms <- c(min_model_terms, "mean_activity_percent")
 	}
 	
 	lower_formula <- as.formula(sprintf("%s ~ %s", response, paste(min_model_terms, collapse = " + ")))
@@ -574,6 +668,7 @@ select_fixed_effects <- function(model, response, edf_summary) {
 		random = formula(model$modelStruct$reStruct),
 		data = model$data,
 		method = "ML",
+		control = lmeControl(opt = "optim"),  # More stable optimizer
 		correlation = model$modelStruct$corStruct,
 		na.action = na.exclude
 	)
@@ -586,6 +681,7 @@ select_fixed_effects <- function(model, response, edf_summary) {
 	
 	return(step_model)
 }
+
 # Validate model
 validate_model <- function(model, response) {
 	message(sprintf("Validating model for: %s", response))
