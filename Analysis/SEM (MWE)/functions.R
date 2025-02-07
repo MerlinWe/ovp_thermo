@@ -69,18 +69,30 @@ check_response_var <- function(data, variable, var_name) {
 	line_plot / hist_plot
 }
 
-# Function to check linearity 
 explore_relationships <- function(data, response_vars, predictor_vars, random_effect = NULL) {
-	results <- list()  # To store results for each combination
+	
+	results <- list()
+	edf_results <- data.frame(response = character(),
+														predictor = character(),
+														EDF = numeric(),
+														correlation = numeric(),
+														stringsAsFactors = FALSE)
 	
 	require(mgcv)
 	
 	for (response in response_vars) {
-		for (predictor in predictor_vars) {
-			cat("\n", strrep("-", 50), "\n")  # Add a separator
+		# Exclude `mean_activity_percent` as predictor when response is `mean_activity_percent`
+		predictors <- if (response == "mean_activity_percent") {
+			setdiff(predictor_vars, "mean_activity_percent")
+		} else {
+			predictor_vars
+		}
+		
+		for (predictor in predictors) {
+			cat("\n", strrep("-", 50), "\n")
 			cat(sprintf("Exploring %s ~ %s\n", response, predictor))
 			
-			# Check correlation (numeric only)
+			# Check correlation
 			if (is.numeric(data[[response]]) && is.numeric(data[[predictor]])) {
 				corr <- cor(data[[response]], data[[predictor]], use = "complete.obs")
 				cat(sprintf("Correlation: %.3f\n", corr))
@@ -88,20 +100,7 @@ explore_relationships <- function(data, response_vars, predictor_vars, random_ef
 				corr <- NA
 			}
 			
-			# Plot relationships with legends
-			p <- ggplot(data, aes_string(x = predictor, y = response)) +
-				geom_point(alpha = 0.6, color = "gray") +
-				geom_smooth(method = "loess", se = FALSE, aes(color = "LOESS"), linetype = "dashed", formula = 'y ~ x') +
-				geom_smooth(method = "gam", formula = y ~ s(x), se = FALSE, aes(color = "GAM")) +
-				scale_color_manual(values = c("LOESS" = "blue", "GAM" = "red")) +
-				labs(color = "Fit Type", 
-						 title = sprintf("%s ~ %s", response, predictor),
-						 x = predictor, 
-						 y = response) +
-				theme_minimal()
-			print(p)
-			
-			# Fit GAM (if both variables are numeric)
+			# Fit GAM model
 			if (is.numeric(data[[response]]) && is.numeric(data[[predictor]])) {
 				gam_formula <- as.formula(sprintf("%s ~ s(%s)", response, predictor))
 				
@@ -111,7 +110,7 @@ explore_relationships <- function(data, response_vars, predictor_vars, random_ef
 					gam_model <- gam(gam_formula, data = data)
 				}
 				
-				edf <- summary(gam_model$gam)$edf[1]
+				edf <- summary(gam_model$gam)$edf[1]  # Extract EDF
 				cat(sprintf("EDF: %.3f\n", edf))
 			} else {
 				gam_model <- NULL
@@ -124,14 +123,19 @@ explore_relationships <- function(data, response_vars, predictor_vars, random_ef
 				predictor = predictor,
 				correlation = corr,
 				gam_model = gam_model,
-				edf = edf,
-				plot = p
+				edf = edf
 			)
+			
+			# Store EDF in summary dataframe
+			edf_results <- rbind(edf_results, data.frame(response = response, 
+																									 predictor = predictor, 
+																									 EDF = edf, 
+																									 correlation = corr))
 		}
-		cat("\n", strrep("=", 50), "\n")  # Add a separator for the next response variable
+		cat("\n", strrep("=", 50), "\n")
 	}
 	
-	return(results)
+	return(list(results = results, edf_summary = edf_results))
 }
 
 # Function to assess temporal autocorrelation 
@@ -234,6 +238,13 @@ explore_random_factor <- function(data, response_vars, random_factor) {
 
 # Function to run interaction test
 test_interaction <- function(data, response, predictor, moderator, random_effect = NULL) {
+	
+	# Dynamically exclude `mean_activity_percent` as a predictor when response is `mean_activity_percent`
+	predictors <- if (response == "mean_activity_percent") {
+		setdiff(predictor_vars, "mean_activity_percent")
+	} else {
+		predictor_vars
+	}
 	
 	message(sprintf("Testing interaction: %s ~ %s * %s", response, predictor, moderator))
 	
@@ -413,25 +424,56 @@ compute_descriptive_stats <- function(data, variables) {
 }
 
 # Test random effects and random slopes
-test_random_effects <- function(data, response, random_slope_candidates) {
+test_random_effects <- function(data, response, random_slope_candidates, edf_summary) {
 	message(sprintf("Testing random effects for: %s", response))
 	
-	# Ensure the response variable is NOT used as a predictor or random slope
-	random_slope_candidates <- setdiff(random_slope_candidates, response)
-	
-	# Define model formula dynamically
-	if (response == "mean_activity_percent") {
-		model_formula <- sprintf("%s ~ season_year + poly(phase_mean_CT,2) + weight + poly(day_season,2)", response)
+	# Dynamically exclude `mean_activity_percent` as a predictor when response is `mean_activity_percent`
+	predictors <- if (response == "mean_activity_percent") {
+		setdiff(predictor_vars, "mean_activity_percent")
 	} else {
-		model_formula <- sprintf("%s ~ season_year + poly(mean_activity_percent,2) + poly(phase_mean_CT,2) + weight + poly(day_season,2)", response)
+		predictor_vars
 	}
 	
-	# Baseline model (random intercept only)
+	# Identify quadratic terms based on EDF
+	relevant_edfs <- edf_summary[edf_summary$response == response, ]
+	quadratic_terms <- relevant_edfs$predictor[relevant_edfs$EDF > 1.5]  # Use cutoff EDF > 1.5
+	
+	# Construct model formula dynamically
+	model_formula <- paste(response, "~ season_year", collapse = " ")
+	
+	# Add predictors dynamically based on EDF insights
+	if ("mean_activity_percent" %in% relevant_edfs$predictor) {
+		if ("mean_activity_percent" %in% quadratic_terms) {
+			model_formula <- paste(model_formula, "+ poly(mean_activity_percent,2)")
+		} else {
+			model_formula <- paste(model_formula, "+ mean_activity_percent")
+		}
+	}
+	
+	if ("phase_mean_CT" %in% relevant_edfs$predictor) {
+		if ("phase_mean_CT" %in% quadratic_terms) {
+			model_formula <- paste(model_formula, "+ poly(phase_mean_CT,2)")
+		} else {
+			model_formula <- paste(model_formula, "+ phase_mean_CT")
+		}
+	}
+	
+	if ("day_season" %in% relevant_edfs$predictor) {
+		if ("day_season" %in% quadratic_terms) {
+			model_formula <- paste(model_formula, "+ poly(day_season,2)")
+		} else {
+			model_formula <- paste(model_formula, "+ day_season")
+		}
+	}
+	
+	model_formula <- as.formula(model_formula)
+	
+	# **Step 1: Fit the baseline model with only a random intercept**
 	base_model <- lme(
-		as.formula(model_formula),
-		random = ~ 1 | ID_phase, 
-		method = "REML", 
-		data = data, 
+		fixed = model_formula,
+		random = ~ 1 | ID_phase,  # Random intercept only
+		method = "REML",
+		data = data,
 		control = lmeControl(opt = "optim"),  # More stable optimizer
 		correlation = corGaus(form = ~ day_season | ID_phase, nugget = TRUE),
 		na.action = na.exclude
@@ -439,15 +481,17 @@ test_random_effects <- function(data, response, random_slope_candidates) {
 	
 	best_model <- base_model
 	best_AIC <- AIC(base_model)
-	best_structure <- "~ 1 | ID_phase"
+	best_structure <- "~ 1 | ID_phase"  # Baseline: Random intercept only
 	
+	# **Step 2: Loop through candidate random slopes**
 	for (var in random_slope_candidates) {
 		message(sprintf("Testing random slope for: %s", var))
 		
+		# **Step 3: Try fitting a model with a random slope**
 		model_candidate <- tryCatch(
 			lme(
-				as.formula(model_formula),
-				random = as.formula(sprintf("~ 1 + %s | ID_phase", var)),
+				fixed = model_formula,
+				random = as.formula(sprintf("~ 1 + %s | ID_phase", var)),  # Adding random slope
 				method = "REML",
 				data = data,
 				control = lmeControl(opt = "optim"),  # More stable optimizer
@@ -460,10 +504,12 @@ test_random_effects <- function(data, response, random_slope_candidates) {
 			}
 		)
 		
+		# **Step 4: Compare AIC values**
 		if (!is.null(model_candidate)) {
 			model_AIC <- AIC(model_candidate)
 			message(sprintf("AIC for model with %s as random slope: %.2f", var, model_AIC))
 			
+			# **Step 5: If AIC is lower, update best model**
 			if (model_AIC < best_AIC) {
 				best_model <- model_candidate
 				best_AIC <- model_AIC
@@ -476,76 +522,70 @@ test_random_effects <- function(data, response, random_slope_candidates) {
 	return(best_model)
 }
 
-# Find best fixed effect structure using stepwise selection 
-select_fixed_effects <- function(model, response) {
-	message(sprintf("Performing stepwise AIC selection for: %s", response))
+# Fixed effect structure model selection 
+select_fixed_effects <- function(model, response, edf_summary) {
+	message(sprintf("Performing stepwise AIC selection (but keep SEM relevant predictors) for: %s", response))
 	
-	# Extract the original formula
-	original_formula <- formula(model)
+	# Dynamically exclude `mean_activity_percent` as a predictor when response is `mean_activity_percent`
+	predictors <- if (response == "mean_activity_percent") {
+		setdiff(predictor_vars, "mean_activity_percent")
+	} else {
+		predictor_vars
+	}
 	
-	# Extract the random effects formula correctly
-	random_effects_formula <- formula(model$modelStruct$reStruct)
+	# Extract relevant EDF values for this response variable
+	relevant_edfs <- edf_summary[edf_summary$response == response, ]
+	quadratic_terms <- relevant_edfs$predictor[relevant_edfs$EDF > 1.5]  
 	
-	# Define possible fixed effect structures explicitly
-	candidate_models <- list(
-		as.formula(sprintf("%s ~ 1", response)),  # Null model
-		as.formula(sprintf("%s ~ season_year", response)),
-		as.formula(sprintf("%s ~ season_year + poly(mean_activity_percent,2)", response)),
-		as.formula(sprintf("%s ~ season_year + poly(phase_mean_CT,2)", response)),
-		as.formula(sprintf("%s ~ season_year + poly(mean_activity_percent,2) + poly(phase_mean_CT,2)", response)),
-		as.formula(sprintf("%s ~ season_year + poly(mean_activity_percent,2) + poly(phase_mean_CT,2) + weight", response)),
-		as.formula(sprintf("%s ~ season_year + poly(mean_activity_percent,2) + poly(phase_mean_CT,2) + weight + poly(day_season,2)", response))
-	)
+	# Construct full model with necessary quadratic terms
+	formula_terms <- c("season_year")  # Always included
 	
-	# Refit model using ML before stepwise selection
-	model_ML <- lme(
-		fixed = original_formula,
-		random = random_effects_formula,
+	for (predictor in predictors) {
+		if (predictor %in% quadratic_terms) {
+			formula_terms <- c(formula_terms, paste0("poly(", predictor, ",2)"))
+		} else {
+			formula_terms <- c(formula_terms, predictor)
+		}
+	}
+	
+	# Full model formula
+	full_formula <- as.formula(sprintf("%s ~ %s", response, paste(formula_terms, collapse = " + ")))
+	
+	# Define the minimum model (lower bound of scope)
+	min_model_terms <- c("season_year")
+	
+	# Ensure `phase_mean_CT` is included and match the quadratic form if necessary
+	if ("phase_mean_CT" %in% quadratic_terms) {
+		min_model_terms <- c(min_model_terms, "poly(phase_mean_CT,2)")
+	} else {
+		min_model_terms <- c(min_model_terms, "phase_mean_CT")
+	}
+	
+	# Ensure `mean_activity_percent` is included unless response is `mean_activity_percent`
+	if (response != "mean_activity_percent") {
+		min_model_terms <- c(min_model_terms, "mean_activity_percent")
+	}
+	
+	lower_formula <- as.formula(sprintf("%s ~ %s", response, paste(min_model_terms, collapse = " + ")))
+	
+	# Fit full model using ML for AIC-based model selection
+	full_model <- lme(
+		fixed = full_formula,
+		random = formula(model$modelStruct$reStruct),
 		data = model$data,
 		method = "ML",
 		correlation = model$modelStruct$corStruct,
 		na.action = na.exclude
 	)
 	
-	# Perform stepwise selection using a predefined set of models
-	best_model <- model_ML
-	best_AIC <- AIC(model_ML)
-	
-	for (cand_formula in candidate_models) {
-		message(sprintf("Testing model: %s", deparse(cand_formula)))
-		
-		candidate_model <- tryCatch(
-			lme(
-				fixed = cand_formula,
-				random = random_effects_formula,
-				data = model$data,
-				method = "ML",
-				correlation = model$modelStruct$corStruct,
-				na.action = na.exclude
-			),
-			error = function(e) {
-				message(sprintf("Model with formula %s failed. Skipping...", deparse(cand_formula)))
-				return(NULL)
-			}
-		)
-		
-		if (!is.null(candidate_model)) {
-			candidate_AIC <- AIC(candidate_model)
-			message(sprintf("AIC: %.2f", candidate_AIC))
-			
-			if (candidate_AIC < best_AIC) {
-				best_model <- candidate_model
-				best_AIC <- candidate_AIC
-			}
-		}
-	}
+	# Perform stepwise selection with corrected scope
+	step_model <- stepAIC(full_model, scope = list(lower = lower_formula, upper = full_formula), direction = "both", trace = TRUE)
 	
 	message("Final Model Summary:")
-	print(summary(best_model))
+	print(summary(step_model))
 	
-	return(best_model)
+	return(step_model)
 }
-
 # Validate model
 validate_model <- function(model, response) {
 	message(sprintf("Validating model for: %s", response))

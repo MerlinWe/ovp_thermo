@@ -45,10 +45,11 @@ rm(plot1, plot2, plot3) # clean environment
 
 ## Note: we disregard WCF (wind chill factor) due to high collinearity 
 response_vars <- c("mean_BT_smooth", "mean_heartrate", "mean_activity_percent")
-predictor_vars <- c("phase_mean_CT", "day_season", "weight")
+predictor_vars <- c("phase_mean_CT", "day_season", "weight", "mean_activity_percent")
 
-## Check linearity 
-lin_results <- explore_relationships(summer, response_vars, predictor_vars, random_effect = list(ID = ~1))
+## Check linearity
+exploration_results <- explore_relationships(summer, response_vars, predictor_vars, random_effect = list(ID = ~1))
+edf_summary <- exploration_results$edf_summary  # Extract EDF summary
 
 ## Check autocorrelation 
 autocorr_BT <- assess_autocorrelation(summer, "mean_BT_smooth", "ID", "season_year", lags = 40)
@@ -66,14 +67,13 @@ interaction_results <- list(
 	"mean_heartrate ~ mean_activity_percent * season_year" = test_interaction(summer, "mean_heartrate", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
 	"mean_BT_smooth ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_BT_smooth", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
 	"mean_heartrate ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_heartrate", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_activity_percent ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_activity_percent", "phase_mean_CT", "season_year", random_effect = ~1 | ID_phase)
-	)
+	"mean_activity_percent ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_activity_percent", "phase_mean_CT", "season_year", random_effect = ~1 | ID_phase))
 
 # Get variable descriptives
 descriptive_stats <- compute_descriptive_stats(summer, c("mean_BT_smooth", "mean_activity_percent", "mean_heartrate", "phase_mean_CT"))
 print(descriptive_stats)
 
-##### ----------- SEM Model Selection & Validation ---------- #####
+##### ----------- Model Selection & Validation ---------- #####
 
 # •	Test random intercept vs. random slopes.
 # •	Use AIC/BIC to decide which random effects to retain.
@@ -88,24 +88,39 @@ print(descriptive_stats)
 # •	Fit final models for HR, BT, ACT.
 # •	Combine into a structural equation model (SEM) using piecewiseSEM.
 
-# try random slopes for covariates 
+# try random slopes for covariates (dynamic quadratic selection based on EDF)
 random_slope_candidates <- c("mean_activity_percent", "phase_mean_CT", "day_season")
-best_random_effects_model_HR <- test_random_effects(summer, "mean_heartrate", random_slope_candidates)
-best_random_effects_model_BT <- test_random_effects(summer, "mean_BT_smooth", random_slope_candidates)
-best_random_effects_model_ACT <- test_random_effects(summer, "mean_activity_percent", random_slope_candidates)
+best_random_effects_model_HR <- test_random_effects(summer, "mean_heartrate", random_slope_candidates, edf_summary)
+best_random_effects_model_BT <- test_random_effects(summer, "mean_BT_smooth", random_slope_candidates, edf_summary)
+best_random_effects_model_ACT <- test_random_effects(summer, "mean_activity_percent", random_slope_candidates, edf_summary)
 
-# Apply to models
-best_fixed_model_HR <- select_fixed_effects(best_random_effects_model_HR, "mean_heartrate")
-best_fixed_model_BT <- select_fixed_effects(best_random_effects_model_BT, "mean_BT_smooth")
-best_fixed_model_ACT <- select_fixed_effects(best_random_effects_model_ACT, "mean_activity_percent")
+# Apply updated fixed effect selection
+best_fixed_model_HR <- select_fixed_effects(best_random_effects_model_HR, "mean_heartrate", edf_summary)
+best_fixed_model_BT <- select_fixed_effects(best_random_effects_model_BT, "mean_BT_smooth", edf_summary)
+best_fixed_model_ACT <- select_fixed_effects(best_random_effects_model_ACT, "mean_activity_percent", edf_summary)
 
-# Validate top models 
+# Validate top models
 validate_HR <- validate_model(best_fixed_model_HR, "mean_heartrate")
 validate_BT <- validate_model(best_fixed_model_BT, "mean_BT_smooth")
 validate_ACT <- validate_model(best_fixed_model_ACT, "mean_activity_percent")
 
-# Asses top model fit
+# Assess model fit
 fit_HR <- assess_model_fit(best_fixed_model_HR, "mean_heartrate")
 fit_BT <- assess_model_fit(best_fixed_model_BT, "mean_BT_smooth")
 fit_ACT <- assess_model_fit(best_fixed_model_ACT, "mean_activity_percent")
 
+# check top models 
+top_HR <- best_fixed_model_HR
+formula(top_HR)
+
+top_BT <- best_fixed_model_BT
+formula(top_BT)
+
+top_ACT <- best_fixed_model_ACT
+formula(top_ACT)
+
+
+
+# do SEM modelling for summer day
+library(piecewiseSEM)
+sem_model <- psem(best_fixed_model_ACT, best_fixed_model_BT, best_fixed_model_HR)
