@@ -10,6 +10,7 @@ prep_ovp <- function(data, season, phase) {
 			block = as.factor(block),
 			year = year(date),
 			season_year = paste0(season, "_", format(date, format = "%y")),
+			season_year = as.factor(season_year),
 			ID_phase = interaction(ID, season_year)
 		) %>%
 		# Set factor levels
@@ -683,13 +684,18 @@ select_fixed_effects <- function(model, response, edf_summary) {
 }
 
 # Validate model
-validate_model <- function(model, response) {
+validate_model <- function(model, response, data, id_var) {
 	message(sprintf("Validating model for: %s", response))
 	
 	# Extract residuals
 	model_residuals <- resid(model, type = "normalized")
+	fitted_values <- fitted(model, type = "normalized")
 	
-	# Residual Histogram
+	# Add residuals to dataset
+	data$residuals <- model_residuals
+	data$fitted_values <- fitted_values
+	
+	# Overall residual histogram
 	hist(model_residuals, main = paste("Residuals for", response), xlab = "Residuals", col = "gray", breaks = 30)
 	
 	# Skewness and Kurtosis
@@ -699,14 +705,45 @@ validate_model <- function(model, response) {
 	message(sprintf("Skewness: %.3f, Kurtosis: %.3f", skew_val, kurt_val))
 	
 	# Residual vs. Fitted plot
-	fitted_values <- fitted(model, type = "normalized")
 	plot(fitted_values, model_residuals, main = paste("Fitted vs. Residuals -", response),
 			 xlab = "Fitted Values", ylab = "Residuals", pch = 19, col = "blue")
 	abline(h = 0, lty = 2, col = "red")
 	
-	# Autocorrelation in Residuals
-	acf(model_residuals, main = paste("Autocorrelation of Residuals -", response), lag.max = 40)
-	pacf(model_residuals, main = paste("Partial Autocorrelation -", response), lag.max = 40)
+	# Get list of unique individuals
+	unique_ids <- unique(data[[id_var]])
+	num_ids <- length(unique_ids)
+	
+	#### ACF Plots ####
+	rows <- ceiling(sqrt(num_ids))  
+	cols <- ceiling(num_ids / rows)  
+	par(mfrow = c(rows, cols))
+	
+	for (i in unique_ids) {
+		id_data <- subset(data, data[[id_var]] == i)
+		
+		if (nrow(id_data) > 10) {
+			acf(id_data$residuals, main = paste("ACF -", response, "ID:", i), lag.max = 40)
+		} else {
+			message(sprintf("Skipping ACF for ID %s due to insufficient data.", i))
+		}
+	}
+	
+	par(mfrow = c(1, 1))  # Reset layout
+	
+	#### PACF Plots ####
+	par(mfrow = c(rows, cols))
+	
+	for (i in unique_ids) {
+		id_data <- subset(data, data[[id_var]] == i)
+		
+		if (nrow(id_data) > 10) {
+			pacf(id_data$residuals, main = paste("PACF -", response, "ID:", i), lag.max = 40)
+		} else {
+			message(sprintf("Skipping PACF for ID %s due to insufficient data.", i))
+		}
+	}
+	
+	par(mfrow = c(1, 1))  # Reset layout
 	
 	return(list(
 		residuals = model_residuals,

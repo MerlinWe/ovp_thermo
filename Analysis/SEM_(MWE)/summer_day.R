@@ -102,9 +102,9 @@ best_fixed_model_BT <- select_fixed_effects(best_random_effects_model_BT, "mean_
 best_fixed_model_ACT <- select_fixed_effects(best_random_effects_model_ACT, "mean_activity_percent", edf_summary)
 
 # Validate top models
-validate_HR <- validate_model(best_fixed_model_HR, "mean_heartrate")
-validate_BT <- validate_model(best_fixed_model_BT, "mean_BT_smooth")
-validate_ACT <- validate_model(best_fixed_model_ACT, "mean_activity_percent")
+validate_HR <- validate_model(best_fixed_model_HR, "mean_heartrate", summer, "ID")
+validate_BT <- validate_model(best_fixed_model_BT, "mean_BT_smooth", summer, "ID")
+validate_ACT <- validate_model(best_fixed_model_ACT, "mean_activity_percent", summer, "ID")
 
 # Assess model fit
 fit_HR <- assess_model_fit(best_fixed_model_HR, "mean_heartrate")
@@ -131,11 +131,16 @@ summer <- summer %>%
 	mutate(
 		phase_mean_CT_sq = phase_mean_CT^2,
 		day_season_sq = day_season^2,
-		weight_sq = weight^2)
+		weight_sq = weight^2,
+		day_season = as.numeric(day_season))
+
+
+summer <- as.data.frame(summer)
+summer$ID_phase <- droplevels(summer$ID_phase)
 
 # Refit top models using the transformed quadratic terms
 
-top_HR <- lme(
+top_HR <- nlme::lme(
 	fixed = mean_heartrate ~ season_year + phase_mean_CT + phase_mean_CT_sq + 
 		day_season + day_season_sq + weight + mean_activity_percent,
 	data = summer,
@@ -145,7 +150,7 @@ top_HR <- lme(
 	na.action = na.exclude,
 	control = lmeControl(opt = "optim"))
 
-top_BT <- lme(
+top_BT <- nlme::lme(
 	fixed = mean_BT_smooth ~ season_year + phase_mean_CT + 
 		day_season + day_season_sq + mean_activity_percent,
 	data = summer,
@@ -153,11 +158,10 @@ top_BT <- lme(
 	correlation = corGaus(form = ~ as.numeric(day_season) | ID_phase, nugget = TRUE), 
 	method = "ML", 
 	na.action = na.exclude,
-	control = lmeControl(opt = "optim")
-)
+	control = lmeControl(opt = "optim"))
 
 
-top_ACT <- lme(
+top_ACT <- nlme::lme(
 	fixed = mean_activity_percent ~ season_year + phase_mean_CT + 
 		weight + weight_sq,
 	data = summer,
@@ -165,17 +169,25 @@ top_ACT <- lme(
 	correlation = corGaus(form = ~ as.numeric(day_season) | ID_phase, nugget = TRUE), 
 	method = "ML", 
 	na.action = na.exclude,
-	control = lmeControl(opt = "optim")
-)
+	control = lmeControl(opt = "optim"))
 
 # Create the piecewise SEM
-psem_model <- psem(
+psem_model <- piecewiseSEM::psem(
 	top_HR,
 	top_BT,
 	top_ACT)
 
-# **Check model summary**
 summary(psem_model)
+traceback()
 
-# **Plot the SEM**
-plot(psem_model)
+class(top_HR)
+class(top_BT)
+class(top_ACT)
+conflicts()
+
+R.version.string
+packageVersion("piecewiseSEM")
+packageVersion("nlme")
+
+cor(summer %>% select(phase_mean_CT, phase_max_CT, prev_phase_mean_CT, prev_phase_max_CT))
+
