@@ -134,10 +134,6 @@ summer <- summer %>%
 		weight_sq = weight^2,
 		day_season = as.numeric(day_season))
 
-
-summer <- as.data.frame(summer)
-summer$ID_phase <- droplevels(summer$ID_phase)
-
 # Refit top models using the transformed quadratic terms
 
 top_HR <- nlme::lme(
