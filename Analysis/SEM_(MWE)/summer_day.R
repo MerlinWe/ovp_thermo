@@ -132,7 +132,10 @@ summer <- summer %>%
 		phase_mean_CT_sq = phase_mean_CT^2,
 		day_season_sq = day_season^2,
 		weight_sq = weight^2,
-		day_season = as.numeric(day_season))
+		day_season = as.numeric(day_season),
+		ID_phase = as.character())
+
+glimpse(summer)
 
 # Refit top models using the transformed quadratic terms
 
@@ -141,7 +144,7 @@ top_HR <- nlme::lme(
 		day_season + day_season_sq + weight + mean_activity_percent,
 	data = summer,
 	random = ~1 + mean_activity_percent | ID_phase, 
-	correlation = corGaus(form = ~ as.numeric(day_season) | ID_phase, nugget = TRUE), 
+	correlation = corGaus(form = ~ day_season | ID_phase, nugget = TRUE), 
 	method = "ML", 
 	na.action = na.exclude,
 	control = lmeControl(opt = "optim"))
@@ -151,7 +154,7 @@ top_BT <- nlme::lme(
 		day_season + day_season_sq + mean_activity_percent,
 	data = summer,
 	random = ~1 | ID_phase, 
-	correlation = corGaus(form = ~ as.numeric(day_season) | ID_phase, nugget = TRUE), 
+	correlation = corGaus(form = ~ day_season | ID_phase, nugget = TRUE), 
 	method = "ML", 
 	na.action = na.exclude,
 	control = lmeControl(opt = "optim"))
@@ -162,7 +165,7 @@ top_ACT <- nlme::lme(
 		weight + weight_sq,
 	data = summer,
 	random = ~1 + phase_mean_CT | ID_phase, 
-	correlation = corGaus(form = ~ as.numeric(day_season) | ID_phase, nugget = TRUE), 
+	correlation = corGaus(form = ~ day_season | ID_phase, nugget = TRUE), 
 	method = "ML", 
 	na.action = na.exclude,
 	control = lmeControl(opt = "optim"))
@@ -174,6 +177,13 @@ psem_model <- piecewiseSEM::psem(
 	top_ACT)
 
 summary(psem_model)
+
+
+
+
+
+
+
 traceback()
 
 class(top_HR)
