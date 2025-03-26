@@ -538,11 +538,11 @@ test_random_effects <- function(data, response, random_slope_candidates, edf_sum
 		}
 	}
 	
-	if ("phase_mean_CT" %in% relevant_edfs$predictor) {
-		if ("phase_mean_CT" %in% quadratic_terms) {
-			model_formula <- paste(model_formula, "+ poly(phase_mean_CT,2)")
+	if ("phase_mean_THI" %in% relevant_edfs$predictor) {
+		if ("phase_mean_THI" %in% quadratic_terms) {
+			model_formula <- paste(model_formula, "+ poly(phase_mean_THI,2)")
 		} else {
-			model_formula <- paste(model_formula, "+ phase_mean_CT")
+			model_formula <- paste(model_formula, "+ phase_mean_THI")
 		}
 	}
 	
@@ -654,11 +654,11 @@ select_fixed_effects <- function(model, response, edf_summary) {
 		min_model_terms <- setdiff(min_model_terms, "mean_activity_percent")
 	}
 	
-	# Ensure `phase_mean_CT` is included and match the quadratic form if necessary
-	if ("phase_mean_CT" %in% quadratic_terms) {
-		min_model_terms <- c(min_model_terms, "poly(phase_mean_CT,2)")
+	# Ensure `phase_mean_THI` is included and match the quadratic form if necessary
+	if ("phase_mean_THI" %in% quadratic_terms) {
+		min_model_terms <- c(min_model_terms, "poly(phase_mean_THI,2)")
 	} else {
-		min_model_terms <- c(min_model_terms, "phase_mean_CT")
+		min_model_terms <- c(min_model_terms, "phase_mean_THI")
 	}
 	
 	lower_formula <- as.formula(sprintf("%s ~ %s", response, paste(min_model_terms, collapse = " + ")))

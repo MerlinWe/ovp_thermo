@@ -25,7 +25,7 @@ library(tidyverse)
 
 # Set WD and get source code functions 
 setwd("/Users/serpent/Documents/VHL/OVP/Code/Analysis")
-source(url("https://raw.githubusercontent.com/MerlinWe/ovp_thermo/main/Analysis/SEM_(MWE)/functions.R"))
+#source(url("https://raw.githubusercontent.com/MerlinWe/ovp_thermo/main/Analysis/SEM_(MWE)/functions.R"))
 source("/Users/serpent/Documents/VHL/OVP/Code/Analysis/SEM_(MWE)/functions.R")
 
 # Read data
@@ -68,12 +68,12 @@ random_factor_AC <- explore_random_factor(summer, "mean_activity_percent", "ID")
 interaction_results <- list(
 	"mean_BT_smooth ~ mean_activity_percent * season_year" = test_interaction(summer, "mean_BT_smooth", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
 	"mean_heartrate ~ mean_activity_percent * season_year" = test_interaction(summer, "mean_heartrate", "mean_activity_percent", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_BT_smooth ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_BT_smooth", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_heartrate ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_heartrate", "phase_mean_CT", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
-	"mean_activity_percent ~ phase_mean_CT * season_year" = test_interaction(summer, "mean_activity_percent", "phase_mean_CT", "season_year", random_effect = ~1 | ID_phase))
+	"mean_BT_smooth ~ phase_mean_THI * season_year" = test_interaction(summer, "mean_BT_smooth", "phase_mean_THI", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
+	"mean_heartrate ~ phase_mean_THI * season_year" = test_interaction(summer, "mean_heartrate", "phase_mean_THI", "season_year", random_effect = ~1 + mean_activity_percent | ID_phase),
+	"mean_activity_percent ~ phase_mean_THI * season_year" = test_interaction(summer, "mean_activity_percent", "phase_mean_THI", "season_year", random_effect = ~1 | ID_phase))
 
 # Get variable descriptives
-descriptive_stats <- compute_descriptive_stats(summer, c("mean_BT_smooth", "mean_activity_percent", "mean_heartrate", "phase_mean_CT"))
+descriptive_stats <- compute_descriptive_stats(summer, c("mean_BT_smooth", "mean_activity_percent", "mean_heartrate", "phase_mean_THI"))
 print(descriptive_stats)
 
 ##### ----------- Model Selection & Validation ---------- #####
@@ -92,7 +92,7 @@ print(descriptive_stats)
 # •	Combine into a structural equation model (SEM) using piecewiseSEM.
 
 # try random slopes for covariates (dynamic quadratic selection based on EDF)
-random_slope_candidates <- c("mean_activity_percent", "phase_mean_CT", "day_season")
+random_slope_candidates <- c("mean_activity_percent", "phase_mean_THI", "day_season")
 best_random_effects_model_HR <- test_random_effects(summer, "mean_heartrate", random_slope_candidates, edf_summary)
 best_random_effects_model_BT <- test_random_effects(summer, "mean_BT_smooth", random_slope_candidates, edf_summary)
 best_random_effects_model_ACT <- test_random_effects(summer, "mean_activity_percent", random_slope_candidates, edf_summary)
@@ -130,18 +130,18 @@ top_ACT$call
 # Create quadratic terms explicitly in data
 summer <- summer %>%
 	mutate(
-		phase_mean_CT_sq = phase_mean_CT^2,
+		phase_mean_THI_sq = phase_mean_THI^2,
 		day_season_sq = day_season^2,
 		weight_sq = weight^2,
 		day_season = as.numeric(day_season),
-		ID_phase = as.character())
+		ID_phase = as.character(ID_phase))
 
 glimpse(summer)
 
 # Refit top models using the transformed quadratic terms
 
 top_HR <- nlme::lme(
-	fixed = mean_heartrate ~ season_year + phase_mean_CT + phase_mean_CT_sq + 
+	fixed = mean_heartrate ~ season_year + phase_mean_THI + phase_mean_THI_sq + 
 		day_season + day_season_sq + weight + mean_activity_percent,
 	data = summer,
 	random = ~1 + mean_activity_percent | ID_phase, 
@@ -151,7 +151,7 @@ top_HR <- nlme::lme(
 	control = lmeControl(opt = "optim"))
 
 top_BT <- nlme::lme(
-	fixed = mean_BT_smooth ~ season_year + phase_mean_CT + 
+	fixed = mean_BT_smooth ~ season_year + phase_mean_THI + 
 		day_season + day_season_sq + mean_activity_percent,
 	data = summer,
 	random = ~1 | ID_phase, 
@@ -162,10 +162,10 @@ top_BT <- nlme::lme(
 
 
 top_ACT <- nlme::lme(
-	fixed = mean_activity_percent ~ season_year + phase_mean_CT + 
+	fixed = mean_activity_percent ~ season_year + phase_mean_THI + 
 		weight + weight_sq,
 	data = summer,
-	random = ~1 + phase_mean_CT | ID_phase, 
+	random = ~1 + phase_mean_THI | ID_phase, 
 	correlation = corGaus(form = ~ day_season | ID_phase, nugget = TRUE), 
 	method = "ML", 
 	na.action = na.exclude,
