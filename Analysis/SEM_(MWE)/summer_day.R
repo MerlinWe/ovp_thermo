@@ -26,9 +26,10 @@ library(tidyverse)
 # Set WD and get source code functions 
 setwd("/Users/serpent/Documents/VHL/OVP/Code/Analysis")
 source(url("https://raw.githubusercontent.com/MerlinWe/ovp_thermo/main/Analysis/SEM_(MWE)/functions.R"))
+source("/Users/serpent/Documents/VHL/OVP/Code/Analysis/SEM_(MWE)/functions.R")
 
 # Read data
-dat <- read_csv("/Users/serpent/Documents/VHL/OVP/Data/ovp_data_10_12_24.csv")
+dat <- read_csv("/Users/serpent/Documents/VHL/OVP/Data/ovp_data_26_03_25.csv")
 
 # Get summer day subset 
 summer <- dat %>% prep_ovp("Summer", "day") # ok
@@ -47,7 +48,7 @@ rm(plot1, plot2, plot3) # clean environment
 
 ## Note: we disregard WCF (wind chill factor) due to high collinearity 
 response_vars <- c("mean_BT_smooth", "mean_heartrate", "mean_activity_percent")
-predictor_vars <- c("phase_mean_CT", "day_season", "weight", "mean_activity_percent")
+predictor_vars <- c("phase_mean_THI", "day_season", "weight", "mean_activity_percent")
 
 ## Check linearity
 exploration_results <- explore_relationships(summer, response_vars, predictor_vars, random_effect = list(ID = ~1))

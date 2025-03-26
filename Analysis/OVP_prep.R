@@ -4,7 +4,7 @@
 
 # ---------- Getting started ----------
 rm(list = ls()) # clean environment 
-setwd("/Users/serpent/Documents/VHL/RAAK/Data")
+setwd("/Users/serpent/Documents/VHL/OVP/Data")
 options(digits = 3, digits.secs = 3, scipen = 999, datatable.quiet = TRUE)
 
 # Install package libraries if needed 
@@ -60,7 +60,7 @@ time_sq <- seq(from = ISOdatetime(2018,11,21,0,0,0),
 # >>>>>>>>>> Import FIWI Data <<<<<<<<<<
 
 # Make sure WD is set to a folder containing ONLY the FIWI data files. 
-setwd("/Users/serpent/Documents/VHL/RAAK/Data/FIWI") 
+setwd("/Users/serpent/Documents/VHL/OVP/Data/FIWI") 
 
 # We will use a custom function to process the FIWI data: 
 process_fiwi <- function(file, name) {
@@ -153,7 +153,7 @@ plot_grid(
 
 # >>>>>>>>>> Import KNMI 269 data <<<<<<<<<<
 # Set WD to a folder containing the KNMI data 
-setwd("/Users/serpent/Documents/VHL/RAAK/Data/KNMI") 
+setwd("/Users/serpent/Documents/VHL/OVP/Data/KNMI") 
 
 knmi_dat <- read.delim("KNMI_2011_2020.txt", header = TRUE, sep = ",") %>%
   # Remove data before collaring
@@ -164,7 +164,7 @@ knmi_dat <- read.delim("KNMI_2011_2020.txt", header = TRUE, sep = ",") %>%
   # Set intervals 
   slice(rep(1:n(), each = 20)) %>%
   # Rename columns
-  dplyr::select(FH, T, SQ, DR, RH, N, R, S) %>%
+  dplyr::select(FH, T, SQ, DR, RH, N, R, S, U) %>%
   dplyr::rename(wind_spd = FH, 
                 knmi_temp = T, 
                 sun_dur = SQ, 
@@ -172,7 +172,8 @@ knmi_dat <- read.delim("KNMI_2011_2020.txt", header = TRUE, sep = ",") %>%
                 prcp_mm = RH, 
                 cloud_cov = N, 
                 prcp = R, 
-                snow = S) %>%
+                snow = S, 
+                rel_hum = U)  %>%
   # Set formats 
   mutate(
     Date = time_sq$Date,
@@ -182,7 +183,7 @@ knmi_dat <- read.delim("KNMI_2011_2020.txt", header = TRUE, sep = ",") %>%
     sun_dur = sun_dur * 0.1,
     prcp_dur = prcp_dur * 0.1) %>%
   # Set column order
-  select(wind_spd, knmi_temp, sun_dur, prcp_dur, prcp_mm, cloud_cov, prcp, snow) %>%
+  dplyr::select(wind_spd, knmi_temp, rel_hum, sun_dur, prcp_dur, prcp_mm, cloud_cov, prcp, snow) %>%
   # Set date format 
   mutate(Date = as.POSIXct(time_sq$Date, format = "%Y-%m-%d %H:%M:%OS"),
          Date = as.POSIXct(Date, format = "%Y-%m-%d %H:%M:%OS"))
@@ -215,6 +216,7 @@ ovp_dat <- Hmisc::Merge(
     all = TRUE, id = ~ Date + ID, verbose = FALSE),
   # Weather data
   Hmisc::Merge(
+    aggregate(rel_hum ~ Date, ovp_dat, mean, drop = FALSE),
     aggregate(wind_spd ~ Date, ovp_dat, mean, drop = FALSE),
     aggregate(knmi_temp ~ Date, ovp_dat, mean, drop = FALSE),
     aggregate(sun_dur ~ Date, ovp_dat, mean, drop = FALSE),
@@ -247,6 +249,8 @@ ovp_dat <- ovp_dat %>%
       Date >= sunrise & Date < sunset ~ "day",
       Date >= sunset & Date < dusk ~ "dusk",
       TRUE ~ "night"),
+    # Temperature Humidity Index (THI)
+    THI = (1.8 * CollarTemp + 32) - ((0.55 - 0.0055 * rel_hum) * (1.8 * CollarTemp - 26)),
     # Wind Chill Factor 
     WCF = 13.12+0.621*CollarTemp-11.37*(wind_spd^0.16)+0.3965*CollarTemp*(wind_spd^0.16),
     # Season 
@@ -301,7 +305,7 @@ ovp_dat <- ovp_dat %>%
 
 temp_dat <- ovp_dat %>%
   # keep relevant columns 
-  dplyr::select(Date, ID, phase, CollarTemp) %>% 
+  dplyr::select(Date, ID, phase, CollarTemp, THI, rel_hum) %>% 
   # Get only the date in Y-M-D
   mutate(Date = as.Date(Date)) %>% 
   # Sort by day and ID
@@ -310,22 +314,52 @@ temp_dat <- ovp_dat %>%
   filter(phase %in% c("day", "night")) %>%
   # Calculate mean and max
   group_by(ID, Date, phase) %>%
-  summarize(
-    phase_mean = mean(CollarTemp, na.rm = TRUE),
-    phase_max = max(CollarTemp, na.rm = TRUE)) %>%
+  dplyr::summarize(
+    # AT (Ambient Temperature)
+    at_phase_mean = mean(CollarTemp, na.rm = TRUE),
+    at_phase_max = max(CollarTemp, na.rm = TRUE),
+    # THI (Temperature Humidity Index)
+    thi_phase_mean = max(THI, na.rm = TRUE),
+    thi_phase_max = max(THI, na.rm = TRUE),
+    
+    # Rel Humidity
+    hum_phase_mean = mean(rel_hum, na.rm = TRUE),
+    hum_phase_max = max(rel_hum, na.rm = TRUE)
+    ) %>%
   # Calculate prev mean and max 
   ungroup() %>%
   arrange(ID, Date, phase) %>%
   group_by(ID) %>%
   mutate(
-    prev_phase_mean = lag(phase_mean, default = NA),
-    prev_phase_max = lag(phase_max, default = NA),
-    prev_phase_mean = if_else(Date - lag(Date) <= 1 & 
+    # AT
+    at_prev_phase_mean = lag(at_phase_mean, default = NA),
+    at_prev_phase_max = lag(at_phase_max, default = NA),
+    at_prev_phase_mean = if_else(Date - lag(Date) <= 1 & 
                                 phase != lag(phase), 
-                              prev_phase_mean, NA_real_),
-    prev_phase_max = if_else(Date - lag(Date) <= 1 & 
+                                at_prev_phase_mean, NA_real_),
+    at_prev_phase_max = if_else(Date - lag(Date) <= 1 & 
                                phase != lag(phase), 
-                             prev_phase_max, NA_real_)) %>%
+                               at_prev_phase_max, NA_real_)) %>%
+  mutate(
+    # THI
+    thi_prev_phase_mean = lag(thi_phase_mean, default = NA),
+    thi_prev_phase_max = lag(thi_phase_max, default = NA),
+    thi_prev_phase_mean = if_else(Date - lag(Date) <= 1 & 
+                                   phase != lag(phase), 
+                                 thi_prev_phase_mean, NA_real_),
+    thi_prev_phase_max = if_else(Date - lag(Date) <= 1 & 
+                                  phase != lag(phase), 
+                                thi_prev_phase_max, NA_real_)) %>%
+  mutate(
+    # HUM
+    hum_prev_phase_mean = lag(hum_phase_mean, default = NA),
+    hum_prev_phase_max = lag(hum_phase_max, default = NA),
+    hum_prev_phase_mean = if_else(Date - lag(Date) <= 1 & 
+                                    phase != lag(phase), 
+                                  hum_prev_phase_mean, NA_real_),
+    hum_prev_phase_max = if_else(Date - lag(Date) <= 1 & 
+                                   phase != lag(phase), 
+                                 hum_prev_phase_max, NA_real_)) %>%
   ungroup()
 
 # >>>>>>>>>> Arrange by block variable  <<<<<<<<<<
@@ -348,16 +382,32 @@ dat <- ovp_dat %>%
   # Get block variable
   dplyr::group_by(ID, phase) %>% 
   dplyr::mutate(block = row_number()) %>% 
+  # Get stress category 
+  mutate(
+    heat_stress = case_when(
+      thi_phase_mean < 68 ~ "comfort",
+      thi_phase_mean >= 68 & thi_phase_mean < 72 ~ "mild discomfort",
+      thi_phase_mean >= 72 & thi_phase_mean < 75 ~ "discomfort",
+      thi_phase_mean >= 75 & thi_phase_mean < 79 ~ "alert",
+      thi_phase_mean >= 79 & thi_phase_mean < 84 ~ "danger",
+      thi_phase_mean >= 84 ~ "emergency",
+      TRUE ~ NA_character_)) %>%
   dplyr::select(ID, Date, phase, season, cum_day, block, BodyTemp, BT_smooth, 
-                phase_mean, phase_max, prev_phase_mean, prev_phase_max,
+                at_phase_mean, at_phase_max, at_prev_phase_mean, at_prev_phase_max,
+                thi_phase_mean, thi_phase_max, thi_prev_phase_mean, thi_prev_phase_max, heat_stress,
+                hum_phase_mean, hum_phase_max, hum_prev_phase_mean, hum_prev_phase_max,
                 ActivityPercent, HeartRate, DurHeadDown, ChangesHeadPos, 
                 EnergyExpHB, Weight, WCF) %>%
   distinct(.keep_all = TRUE) %>%
+  ungroup() %>%
   # Replace NaN with NA
   mutate_all(~replace(., is.nan(.), NA))
-
+  
+  
 colnames(dat) <- c("ID", "date", "phase", "season", "cum_day", "block", "mean_BT_raw", "mean_BT_smooth", 
-                   "phase_mean_CT", "phase_max_CT", "prev_phase_mean_CT", "prev_phase_max_CT", 
+                   "phase_mean_CT", "phase_max_CT", "prev_phase_mean_CT", "prev_phase_max_CT",
+                   "phase_mean_THI", "phase_max_THI", "prev_phase_mean_THI", "prev_phase_max_THI", "heat_stress",
+                   "phase_mean_HUM", "phase_max_HUM", "prev_phase_mean_HUM", "prev_phase_max_HUM",
                    "mean_activity_percent", "mean_heartrate", "mean_head_down", "mean_head_change", "mean_energy_exp",
                    "weight", "mean_wcf")
 
@@ -412,5 +462,5 @@ ggsave(filename = "ovp_values.png",
        dpi = 1257)
 
 # Write file 
-write_csv(dat, paste0("/Users/serpent/Documents/VHL/RAAK/Data/", "ovp_data_", format(Sys.time(), "%d_%m_%y"), ".csv"))
+write_csv(dat, paste0("/Users/serpent/Documents/VHL/OVP/Data/", "ovp_data_", format(Sys.time(), "%d_%m_%y"), ".csv"))
 
