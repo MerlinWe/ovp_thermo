@@ -23,10 +23,10 @@ library(tidyverse)
 
 # Set WD and get source code functions 
 setwd("/Users/serpent/Documents/VHL/OVP/Code/Analysis")
-source("SEM (MWE)/functions.R")
+source("SEM_(MWE)/functions.R")
 
 # Read data
-dat <- read_csv("/Users/serpent/Documents/VHL/OVP/Data/ovp_data_10_12_24.csv")
+dat <- read_csv("/Users/serpent/Documents/VHL/OVP/Data/ovp_data_26_03_25.csv")
 
 # Get winter day subset 
 winter <- dat %>% prep_ovp("Winter", "day") # ok

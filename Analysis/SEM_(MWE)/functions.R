@@ -9,38 +9,44 @@ prep_ovp <- function(data, season, phase) {
 			phase = as.factor(phase),
 			block = as.factor(block),
 			year = year(date),
-			season_year = paste0(season, "_", format(date, format = "%y")),
+			
+			# Redefine season_year to not fail in winter
+			season_year = case_when(
+				season == "Winter" & month(date) == 12 ~ paste0("Winter_", year(date)),
+				season == "Winter" & month(date) %in% 1:2 ~ paste0("Winter_", year(date) - 1),
+				TRUE ~ paste0(as.character(season), "_", year(date))
+			),
+			
 			season_year = as.factor(season_year),
 			ID_phase = interaction(ID, season_year)
 		) %>%
 		# Set factor levels
 		mutate(
-			phase = relevel(phase, ref="day"),
+			phase = relevel(phase, ref = "day"),
 			season = relevel(season, ref = "Fall")
 		) %>%
-		# Get clean day_season counter
+		# Filter and calculate day_season
 		dplyr::filter(season == {{season}}, phase == {{phase}}) %>%
-		dplyr::group_by(season, year) %>%
+		dplyr::group_by(season_year) %>%
 		dplyr::mutate(day_season = match(date, seq(min(date), max(date), by = "days"))) %>%
 		dplyr::ungroup() %>%
-		
-		# Remove data with >5 obs of IDs per season
-		group_by(year, ID) %>%                   
-		filter(n() >= 5) %>%                       
-		ungroup() 
+		# Remove sparse data
+		group_by(season_year, ID) %>%
+		filter(n() >= 5) %>%
+		ungroup()
 	
 	plot <- data %>% 
-		ggplot(aes(x=day_season, y=ID, group=ID, fill = ID, colour = ID))+
+		ggplot(aes(x = day_season, y = ID, group = ID, fill = ID, colour = ID)) +
 		geom_point() +
 		theme_minimal() +
-		labs(x="cumulative day per season", y = NULL, 
-				 title = paste({{season}},{{phase}})) +
+		labs(x = "cumulative day per season", y = NULL, 
+				 title = paste({{season}}, {{phase}})) +
 		theme(legend.position = "none")
 	
 	print(plot)
 	return(data)
 }
-
+	
 # Function to explore response vars 
 check_response_var <- function(data, variable, var_name) {
 	
