@@ -141,7 +141,7 @@ glimpse(summer)
 # Refit top models using the transformed quadratic terms
 
 top_HR <- nlme::lme(
-	fixed = mean_heartrate ~ season_year + phase_mean_THI + phase_mean_THI_sq + 
+	fixed = mean_heartrate ~ season_year + phase_mean_THI + 
 		day_season + day_season_sq + weight + mean_activity_percent,
 	data = summer,
 	random = ~1 + mean_activity_percent | ID_phase, 
