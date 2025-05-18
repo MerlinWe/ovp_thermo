@@ -4,8 +4,46 @@ library(tidyverse)
 library(patchwork)
 
 # === Load & prepare data ===
-pathways <- read_csv("/Users/serpent/Documents/VHL/OVP/Code/Pathways/lmm_effect_plots/pathway_effects.csv")
-thi <- read_csv("/Users/serpent/Documents/VHL/OVP/Code/Pathways/lmm_effect_plots/combined_THI.csv")
+pathways <- read_csv("/Users/merlin/Documents/VHL/OVP/Code/Figures/effects/pathway_effects.csv")
+thi <- read_csv("/Users/merlin/Documents/VHL/OVP/Code/Figures/effects/combined_THI.csv")
+
+sig <- read_csv("/Users/merlin/Documents/VHL/OVP/Code/Figures/effects/sig_lines_ovp.csv") %>% 
+  mutate(
+    season = str_to_title(season),
+    response = case_when(
+      y == "heartrate" ~ "Heart Rate",
+      y == "bt" ~ "Body Temperature",
+      y == "activity" ~ "Activity",
+      TRUE ~ y
+    ),
+    predictor = case_when(
+      x == "thi" ~ "THI",
+      x == "activity" ~ "Activity",
+      TRUE ~ x
+    ),
+    timeofday = str_to_title(phase)
+  ) %>%
+  dplyr:: select(-x, -y, -phase)
+
+pathways <- pathways %>%
+  left_join(sig %>%
+              filter(predictor == "Activity") %>%
+              dplyr::select(response, season, timeofday, sig) %>%
+              rename(sig_flag = sig),
+            by = c("response", "season", "timeofday")) %>%
+  mutate(sig_flag = ifelse(is.na(sig_flag), FALSE, sig_flag))
+
+thi <- thi %>%
+  left_join(sig %>%
+              filter(predictor == "THI") %>%
+              dplyr::select(response, season, timeofday, sig) %>%
+              rename(sig_flag = sig),
+            by = c("focus_variable" = "response", "season", "timeofday")) %>%
+  mutate(sig_flag = ifelse(is.na(sig_flag), FALSE, sig_flag))
+
+table(pathways$sig_flag, pathways$response)
+table(thi$sig_flag, thi$focus_variable)
+
 
 # Add linetype
 pathways <- pathways %>%
@@ -42,36 +80,40 @@ thi_lines <- list(
 
 # === Plot functions ===
 plot_pathway <- function(data, resp, xlab, ylab, title) {
-	ggplot(filter(data, response == resp),
-				 aes(x = x, y = fit, color = season_name, linetype = timeofday)) +
-		geom_line(size = .7) + color_scale + linetype_scale +
-		labs(x = xlab, y = ylab, title = title, color = NULL, linetype = NULL) +
-		theme_bw(base_line_size = 0) +
-		theme(text = element_text(size = 10),
-					axis.title = element_text(size = 10),
-					plot.title = element_text(face = "bold", size = 10))
+  ggplot(filter(data, response == resp),
+         aes(x = x, y = fit, color = season_name, linetype = timeofday, linewidth = sig_flag)) +
+    geom_line() +
+    color_scale + linetype_scale +
+    scale_linewidth_manual(values = c(`TRUE` = 1.2, `FALSE` = 0.4)) +
+    labs(x = xlab, y = ylab, title = title, color = NULL, linetype = NULL, linewidth = NULL) +
+    theme_bw(base_line_size = 0) +
+    theme(text = element_text(size = 10),
+          axis.title = element_text(size = 10),
+          plot.title = element_text(face = "bold", size = 10))
 }
 
 plot_thi <- function(data, focus_var, ylab, title) {
-	ggplot(filter(data, focus_variable == focus_var),
-				 aes(x = phase_mean_THI, y = fit, color = season_name, linetype = timeofday)) +
-		geom_line(size = .7) + color_scale + linetype_scale +
-		thi_lines +  # <--- now active
-		labs(x = "Temperature-Humidity-Index", y = ylab, title = title) +
-		theme_bw(base_line_size = 0) +
-		theme(legend.position = "none",
-					panel.grid.minor = element_blank(),
-					text = element_text(size = 10),
-					axis.title = element_text(size = 10),
-					plot.title = element_text(face = "bold", size = 10))
+  ggplot(filter(data, focus_variable == focus_var),
+         aes(x = phase_mean_THI, y = fit, color = season_name, linetype = timeofday, linewidth = sig_flag)) +
+    geom_line() +
+    color_scale + linetype_scale +
+    scale_linewidth_manual(values = c(`TRUE` = 1.2, `FALSE` = 0.4)) +
+    thi_lines +
+    labs(x = "Temperature-Humidity-Index", y = ylab, title = title) +
+    theme_bw(base_line_size = 0) +
+    theme(legend.position = "none",
+          panel.grid.minor = element_blank(),
+          text = element_text(size = 10),
+          axis.title = element_text(size = 10),
+          plot.title = element_text(face = "bold", size = 10))
 }
 
 # === Individual plots ===
-plot_act_to_hr <- plot_pathway(pathways, "Heart Rate", "Non-Recumbent (%, Activity)", "Heart Rate (bpm)", "d.")
-plot_act_to_bt <- plot_pathway(pathways, "Body Temperature", "Non-Recumbent (%, Activity)", "Body Temperature (°C)", "e.")
-plot_thi_hr    <- plot_thi(thi, "Heart Rate", "Heart Rate (bpm)", "c.")
-plot_thi_act   <- plot_thi(thi, "Activity", "Non-Recumbent (%)", "a.")
-plot_thi_bt    <- plot_thi(thi, "Body Temperature", "Body Temperature (°C)", "b.")
+plot_act_to_hr <- plot_pathway(pathways, "Heart Rate", "Non-Recumbent (%, Activity)", "Heart Rate (bpm)", "")
+plot_act_to_bt <- plot_pathway(pathways, "Body Temperature", "Non-Recumbent (%, Activity)", "Body Temperature (°C)", "")
+plot_thi_hr    <- plot_thi(thi, "Heart Rate", "Heart Rate (bpm)", "")
+plot_thi_act   <- plot_thi(thi, "Activity", "Non-Recumbent (%)", "")
+plot_thi_bt    <- plot_thi(thi, "Body Temperature", "Body Temperature (°C)", "")
 
 # === Combine plots ===
 plot_direct <- (plot_act_to_hr / plot_act_to_bt) + 
@@ -88,15 +130,12 @@ pathways_combined <- (plot_thi_combined | plot_direct) +
 	plot_layout(widths = c(1, 1))
 
 ggsave(
-	filename = "/Users/serpent/Desktop/pathway_plot_compressed.png",
+	filename = "/Users/merlin/Desktop/pathway_plot_compressed.png",
 	plot = pathways_combined,
 	width = 240,
 	height = 200,
 	units = "mm",
 	dpi = 500)
-
-
-
 
 # Simplified stress levels
 thi_legend_df <- tibble(
@@ -111,9 +150,8 @@ thi_legend_plot <- ggplot(thi_legend_df, aes(x = x, y = 1, label = label)) +
 	scale_x_continuous(limits = c(60, 90), expand = c(0, 0)) +
 	theme_void()
 
-
 ggsave(
-	filename = "/Users/serpent/Desktop/thi_legend.png",
+	filename = "/Users/merlin/Desktop/thi_legend.png",
 	plot = thi_legend_plot,
 	width = 240,
 	height = 200,
@@ -121,7 +159,7 @@ ggsave(
 	dpi = 500)
 
 ggsave(
-	filename = "/Users/serpent/Desktop/pathway_plot_legend.png",
+	filename = "/Users/merlin/Desktop/pathway_plot_legend.png",
 	plot = pathways_combined,
 	width = 440,
 	height = 200,

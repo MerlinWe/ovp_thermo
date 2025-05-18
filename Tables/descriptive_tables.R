@@ -1,6 +1,10 @@
+rm(list = ls()); gc()
+
 library(dplyr)
 library(gt)
 library(purrr)
+
+dat <- read_csv("~/Documents/VHL/OVP/Data/ovp_data_26_03_25.csv")
 
 prep_data <- dat %>%
 	filter(phase %in% c("day", "night")) %>%
@@ -25,39 +29,47 @@ prep_data <- dat %>%
 season_phase_combos <- prep_data %>%
 	distinct(season, phase)
 
+
+
 # Function to summarise one subset
 summarise_subset <- function(df, season_i, phase_i) {
-	df_sub <- df %>%
-		filter(season == season_i, phase == phase_i) %>%
-		group_by(thi_range, heat_stress) %>%
-		summarise(
-			N = n(),
-			BodyTemp_mean = mean(mean_BT_smooth, na.rm = TRUE),
-			BodyTemp_sd   = sd(mean_BT_smooth, na.rm = TRUE),
-			
-			Activity_mean = mean(mean_activity_percent, na.rm = TRUE),
-			Activity_sd   = sd(mean_activity_percent, na.rm = TRUE),
-			
-			HR_mean       = mean(mean_heartrate, na.rm = TRUE),
-			HR_sd         = sd(mean_heartrate, na.rm = TRUE),
-			.groups = "drop"
-		) %>%
-		mutate(
-			BodyTemp = ifelse(N == 1,
-												sprintf("%.2f", BodyTemp_mean),
-												sprintf("%.2f ± %.2f", BodyTemp_mean, BodyTemp_sd)),
-			Activity = ifelse(N == 1,
-												sprintf("%.2f", Activity_mean),
-												sprintf("%.2f ± %.2f", Activity_mean, Activity_sd)),
-			HR = ifelse(N == 1,
-									sprintf("%.2f", HR_mean),
-									sprintf("%.2f ± %.2f", HR_mean, HR_sd)),
-			Season = season_i,
-			Phase = phase_i
-		) %>%
-		dplyr::select(Season, Phase, thi_range, heat_stress, N, BodyTemp, Activity, HR)
-	
-	return(df_sub)
+  df_sub <- df %>%
+    filter(season == season_i, phase == phase_i) %>%
+    summarise(
+      N = n(),
+      
+      BT_mean = mean(mean_BT_smooth, na.rm = TRUE),
+      BT_sd   = sd(mean_BT_smooth, na.rm = TRUE),
+      BT_min  = min(mean_BT_smooth, na.rm = TRUE),
+      BT_max  = max(mean_BT_smooth, na.rm = TRUE),
+      
+      Act_mean = mean(mean_activity_percent, na.rm = TRUE),
+      Act_sd   = sd(mean_activity_percent, na.rm = TRUE),
+      Act_min  = min(mean_activity_percent, na.rm = TRUE),
+      Act_max  = max(mean_activity_percent, na.rm = TRUE),
+      
+      HR_mean  = mean(mean_heartrate, na.rm = TRUE),
+      HR_sd    = sd(mean_heartrate, na.rm = TRUE),
+      HR_min   = min(mean_heartrate, na.rm = TRUE),
+      HR_max   = max(mean_heartrate, na.rm = TRUE),
+      
+      THI_mean = mean(phase_mean_THI, na.rm = TRUE),
+      THI_sd   = sd(phase_mean_THI, na.rm = TRUE),
+      THI_min  = min(phase_mean_THI, na.rm = TRUE),
+      THI_max  = max(phase_mean_THI, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      BodyTemp = sprintf("%.2f ± %.2f (%.2f–%.2f)", BT_mean, BT_sd, BT_min, BT_max),
+      Activity = sprintf("%.2f ± %.2f (%.2f–%.2f)", Act_mean, Act_sd, Act_min, Act_max),
+      HR       = sprintf("%.2f ± %.2f (%.2f–%.2f)", HR_mean, HR_sd, HR_min, HR_max),
+      THI      = sprintf("%.2f ± %.2f (%.2f–%.2f)", THI_mean, THI_sd, THI_min, THI_max),
+      Season = season_i,
+      Phase = phase_i
+    ) %>%
+    dplyr::select(Season, Phase, N, BodyTemp, Activity, HR, THI)
+  
+  return(df_sub)
 }
 
 # Apply over all combinations
@@ -65,14 +77,12 @@ combined_summary <- purrr::map2_dfr(season_phase_combos$season, season_phase_com
 																		~ summarise_subset(prep_data, .x, .y))
 
 combined_summary %>%
-	arrange(Season, thi_range, Phase) %>%
+	arrange(Season, Phase) %>%
 	gt(groupname_col = "Season") %>%
 	tab_header(
-		title = md("**Descriptive Summary by Season, Phase, and Heat Stress**")
+		title = md("**Descriptive Summary by Season, and Phase**")
 	) %>%
 	cols_label(
-		thi_range = "THI Range",
-		heat_stress = "Heat Stress",
 		Phase = "Phase",
 		N = "n obs",
 		BodyTemp = "Body Temp (°C)",
@@ -97,19 +107,18 @@ library(officer)
 
 # Convert the long summary table to flextable
 ft <- combined_summary %>%
-	arrange(Season, thi_range, Phase) %>%
+	arrange(Season, Phase) %>%
 	flextable() %>%
 	set_header_labels(
-		thi_range = "THI Range",
-		heat_stress = "Heat Stress",
 		Phase = "Phase",
 		N = "n obs",
 		BodyTemp = "Body Temp (°C)",
 		Activity = "Activity (%)",
-		HR = "Heart Rate (bpm)"
+		HR = "Heart Rate (bpm)",
+		THI = "Temperatue-Humidity-Index"
 	) %>%
 	autofit() %>%
-	add_header_lines("Descriptive Summary by Season, Phase, and Heat Stress") %>%
+	add_header_lines("Descriptive Summary by Season, and Phase") %>%
 	theme_box()
 
 # Export to Word
@@ -117,7 +126,7 @@ doc <- read_docx() %>%
 	body_add_flextable(ft) %>%
 	body_add_par("", style = "Normal")
 
-print(doc, target = "heat_stress_summary.docx")
+print(doc, target = "heat_stress_summary_no_thi.docx")
 
 
 
